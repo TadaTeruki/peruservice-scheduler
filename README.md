@@ -1,6 +1,6 @@
-# peruservice-auth
+# peruservice-scheduler
 
-peruservice用の認証サービスです。
+スケジュール管理サービスです。
 
 APIの仕様は`OpenApi.yml`を参照してください。
 
