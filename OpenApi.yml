@@ -283,4 +283,3 @@ components:
     Bearer:
       type: http
       scheme: bearer
-      description: JWTアクセストークン

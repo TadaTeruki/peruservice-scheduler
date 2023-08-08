@@ -13,8 +13,8 @@ services:
       - ./:/app
     ports:
       - ${SCHEDULER_PORT}:${SCHEDULER_PORT}
-  peruservice-db:
-    container_name: peruservice-db
+  scheduler-db:
+    container_name: scheduler-db
     image: postgres:15-alpine
     tty: true
     volumes:
@@ -27,4 +27,4 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
     ports:
-      - ${DB_PORT}:${DB_PORT}
+      - ${DB_PORT}:5432

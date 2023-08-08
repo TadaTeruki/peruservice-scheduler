@@ -22,7 +22,7 @@ func NewHandler(conf *config.ServerConfig) (*Handler, error) {
 	db, err := sqlx.Open(
 		"postgres",
 		"host="+conf.EnvConf.DBHost+
-			" port="+conf.EnvConf.DBPort+
+			" port=5432"+
 			" user="+conf.EnvConf.DBUser+
 			" password="+conf.EnvConf.DBPassWord+
 			" dbname="+conf.EnvConf.DBName+

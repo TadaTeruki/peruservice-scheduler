@@ -12,7 +12,6 @@ type EnvConfig struct {
 	SchedulerPort         string
 	SchedulerAllowOrigins []string
 	PublicKeySrc          []byte
-	DBPort                string
 	DBHost                string
 	DBUser                string
 	DBPassWord            string
@@ -57,11 +56,6 @@ func QueryServerConfig() (*ServerConfig, error) {
 	}
 
 	publicKeySrc, err := os.ReadFile(publicKeyFile)
-	if err != nil {
-		return nil, err
-	}
-
-	dbPort, err := getEnvVar("DB_PORT")
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +105,6 @@ func QueryServerConfig() (*ServerConfig, error) {
 			SchedulerPort:         schedulerPort,
 			SchedulerAllowOrigins: schedulerAllowOrigins,
 			PublicKeySrc:          publicKeySrc,
-			DBPort:                dbPort,
 			DBHost:                dbHost,
 			DBUser:                dbUser,
 			DBPassWord:            dbPassword,
