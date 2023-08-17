@@ -4,36 +4,21 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/TadaTeruki/peruservice-scheduler/config"
+	"github.com/TadaTeruki/peruservice-scheduler/api/domain"
 	"github.com/TadaTeruki/peruservice-scheduler/pkg/timeconv"
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 
 	"github.com/lib/pq"
 )
 
 type Handler struct {
-	db     *sqlx.DB
-	config *config.ServerConfig
+	repository domain.IScheduleRepository
 }
 
-func NewHandler(conf *config.ServerConfig) (*Handler, error) {
-	db, err := sqlx.Open(
-		"postgres",
-		"host="+conf.EnvConf.DBHost+
-			" port=5432"+
-			" user="+conf.EnvConf.DBUser+
-			" password="+conf.EnvConf.DBPassWord+
-			" dbname="+conf.EnvConf.DBName+
-			" sslmode=disable",
-	)
-	if err != nil {
-		return nil, err
-	}
+func NewHandler(repository domain.IScheduleRepository) (*Handler, error) {
 	return &Handler{
-		db:     db,
-		config: conf,
+		repository: repository,
 	}, nil
 }
 
@@ -56,28 +41,35 @@ func (h *Handler) PostSchedule(c echo.Context) error {
 
 	scheduleID := uuid.New().String()
 
-	schedule := Schedule{
+	var constant *domain.Constant
+	if request.Constant != nil {
+		constant = &domain.Constant{
+			ScheduleID:   scheduleID,
+			StartDate:    request.Constant.StartDate,
+			EndDate:      request.Constant.EndDate,
+			IntervalDays: request.Constant.IntervalDays,
+		}
+	}
+
+	schedule := domain.Schedule{
 		ID:          scheduleID,
 		Title:       request.Title,
 		Description: request.Description,
 		StartDate:   request.StartDate,
 		EndDate:     request.EndDate,
-		Allday:      request.Allday,
 		Tags:        pq.StringArray(request.Tags),
 		Properties:  pq.StringArray(request.Properties),
 		IsPublic:    request.IsPublic,
+		Constant:    constant,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
 
-	_, err := h.db.NamedExec(
-		"INSERT INTO schedules (id, title, description, start_date, end_date, allday, tags, properties, is_public, created_at, updated_at) VALUES (:id, :title, :description, :start_date, :end_date, :allday, :tags, :properties, :is_public, :created_at, :updated_at)",
-		schedule,
-	)
+	err := h.repository.PostSchedule(&schedule)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
-			Message: "failed to insert schedule: " + err.Error(),
+			Message: "failed to insert schedule",
 		})
 	}
 
@@ -90,8 +82,8 @@ func (h *Handler) GetSchedule(c echo.Context) error {
 	permission := c.Get(string(ContextKeyPermission)).(Permission)
 	scheduleID := c.Param("scheduleID")
 
-	schedule := Schedule{}
-	if err := h.db.Get(&schedule, "SELECT * FROM schedules WHERE id = $1", scheduleID); err != nil {
+	schedule, err := h.repository.GetSchedule(scheduleID)
+	if err != nil {
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
 			Message: "failed to get schedule from db",
@@ -102,15 +94,24 @@ func (h *Handler) GetSchedule(c echo.Context) error {
 		schedule.SetDetailsHidden()
 	}
 
+	var constant *ConstantResponse
+	if schedule.Constant != nil {
+		constant = &ConstantResponse{
+			StartDate:    schedule.Constant.StartDate,
+			EndDate:      schedule.Constant.EndDate,
+			IntervalDays: schedule.Constant.IntervalDays,
+		}
+	}
+
 	response := GetScheduleResponse{
 		ScheduleID:  schedule.ID,
 		Title:       schedule.Title,
 		Description: schedule.Description,
 		StartDate:   schedule.StartDate,
 		EndDate:     schedule.EndDate,
-		Allday:      schedule.Allday,
 		Tags:        schedule.Tags,
 		Properties:  schedule.Properties,
+		Constant:    constant,
 		IsPublic:    schedule.IsPublic,
 		CreatedAt:   schedule.CreatedAt,
 		UpdatedAt:   schedule.UpdatedAt,
@@ -138,10 +139,8 @@ func (h *Handler) GetScheduleList(c echo.Context) error {
 		})
 	}
 
-	_, _ = startDate, endDate
-
-	scheduleList := []Schedule{}
-	if err := h.db.Select(&scheduleList, "SELECT * FROM schedules WHERE end_date >= $1 AND start_date <= $2", startDate, endDate); err != nil {
+	scheduleList, err := h.repository.GetScheduleList(startDate, endDate)
+	if err != nil {
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
 			Message: "failed to get schedule list from db",
@@ -149,7 +148,7 @@ func (h *Handler) GetScheduleList(c echo.Context) error {
 	}
 
 	scheduleListResponse := []GetScheduleResponse{}
-	for _, schedule := range scheduleList {
+	for _, schedule := range *scheduleList {
 		if !schedule.IsPublic && permission != PermissionAdmin {
 			schedule.SetDetailsHidden()
 		}
@@ -159,9 +158,9 @@ func (h *Handler) GetScheduleList(c echo.Context) error {
 			Description: schedule.Description,
 			StartDate:   schedule.StartDate,
 			EndDate:     schedule.EndDate,
-			Allday:      schedule.Allday,
 			Tags:        schedule.Tags,
 			Properties:  schedule.Properties,
+			Constant:    nil,
 			IsPublic:    schedule.IsPublic,
 			CreatedAt:   schedule.CreatedAt,
 			UpdatedAt:   schedule.UpdatedAt,
@@ -188,30 +187,36 @@ func (h *Handler) PutSchedule(c echo.Context) error {
 
 	var request PutScheduleRequest
 	if err := c.Bind(&request); err != nil {
-		return c.JSON(http.StatusBadRequest, "Invalid request")
+		return c.JSON(http.StatusBadRequest, "invalid request")
 	}
 
-	schedule := Schedule{
+	var constant *domain.Constant
+	if request.Constant != nil {
+		constant = &domain.Constant{
+			ScheduleID:   scheduleID,
+			StartDate:    request.Constant.StartDate,
+			EndDate:      request.Constant.EndDate,
+			IntervalDays: request.Constant.IntervalDays,
+		}
+	}
+
+	schedule := domain.Schedule{
 		ID:          scheduleID,
 		Title:       request.Title,
 		Description: request.Description,
 		StartDate:   request.StartDate,
 		EndDate:     request.EndDate,
-		Allday:      request.Allday,
 		Tags:        pq.StringArray(request.Tags),
 		Properties:  pq.StringArray(request.Properties),
+		Constant:    constant,
 		IsPublic:    request.IsPublic,
 		UpdatedAt:   time.Now(),
 	}
-
-	_, err := h.db.NamedExec(
-		"UPDATE schedules SET title = :title, description = :description, start_date = :start_date, end_date = :end_date, allday = :allday, tags = :tags, properties = :properties, is_public = :is_public, updated_at = :updated_at WHERE id = :id",
-		schedule,
-	)
+	err := h.repository.PutSchedule(&schedule)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
-			Message: "failed to update schedule: " + err.Error(),
+			Message: "failed to update schedule",
 		})
 	}
 	response := PutScheduleResponse{ScheduleID: scheduleID}
@@ -230,11 +235,11 @@ func (h *Handler) DeleteSchedule(c echo.Context) error {
 
 	scheduleID := c.Param("scheduleID")
 
-	_, err := h.db.Exec("DELETE FROM schedules WHERE id = $1", scheduleID)
+	err := h.repository.DeleteSchedule(scheduleID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Status:  http.StatusInternalServerError,
-			Message: "failed to delete schedule: " + err.Error(),
+			Message: "failed to delete schedule",
 		})
 	}
 

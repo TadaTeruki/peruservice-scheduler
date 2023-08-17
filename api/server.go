@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/TadaTeruki/peruservice-scheduler/api/controller"
+	"github.com/TadaTeruki/peruservice-scheduler/api/infrastructure"
 	"github.com/TadaTeruki/peruservice-scheduler/config"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -26,7 +27,11 @@ func NewServer(e *echo.Echo) *Server {
 	if err != nil {
 		log.Fatalf("failed to connect to db: %v", err)
 	}
-	handler, err := controller.NewHandler(conf)
+	repository, err := infrastructure.NewScheduleRepository(conf)
+	if err != nil {
+		log.Fatalf("failed to create repository: %v", err)
+	}
+	handler, err := controller.NewHandler(repository)
 	if err != nil {
 		log.Fatalf("failed to create handler: %v", err)
 	}
